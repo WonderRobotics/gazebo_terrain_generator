@@ -52,6 +52,20 @@ class Utils:
             print(e)
             return e.code if hasattr(e, "code") else -1
 
+    @staticmethod
+    def download_bytes(url, x, y, z, api_key=''):
+        """Fetch a tile into memory (no disk write). Returns bytes or None."""
+        url = Utils.qualify_url(url, x, y, z, api_key)
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'GazeboTerrainGenerator/1.0 (https://github.com/gazebo-terrain-generator)'
+            })
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return resp.read()
+        except urllib.error.URLError as e:
+            print(e)
+            return None
+
 
 class ConcatImage:
     def __init__(self, **kwargs):

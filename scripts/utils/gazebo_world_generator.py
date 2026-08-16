@@ -99,6 +99,18 @@ class OrthoGenerator(ConcatImage):
         cv2.fillPoly(poly_mask, [np.array(poly_pts, dtype=np.int32)], 255)
         stitched_image[poly_mask == 0] = 128
 
+        # Cap the aerial texture to a GPU-loadable size. The raw stitch is
+        # n_tiles*256 px per side and can exceed GL_MAX_TEXTURE_SIZE for large or
+        # high-zoom selections, which makes the GL driver refuse the texture and
+        # crashes gz-sim's renderer. Downsample before the square-pad (INTER_AREA is
+        # the correct filter for shrinking) so the padded output is also within cap.
+        cap = GlobalParam.MAX_AERIAL_TEXTURE_SIZE
+        if max(h, w) > cap:
+            scale = cap / max(h, w)
+            new_w, new_h = int(round(w * scale)), int(round(h * scale))
+            stitched_image = cv2.resize(stitched_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            h, w = stitched_image.shape[:2]
+
         # gz-sim normalizes texture UV by size_x for both axes, so a non-square image
         # causes the shorter dimension to be cut off. Pad to square with gray so all
         # tiles remain visible regardless of bounding box aspect ratio.

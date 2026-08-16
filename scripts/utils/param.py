@@ -31,3 +31,9 @@ class GlobalParam:
     # Valid Gazebo heightmap sizes (must be 2^n+1)
     VALID_HEIGHTMAP_SIZES       = [257, 513, 1025, 2049, 4097]
 
+    # Max aerial.png texture dimension (px). GPUs cap textures at GL_MAX_TEXTURE_SIZE
+    # (commonly 16384; 32768 on high-end cards) — exceeding it makes the GL driver
+    # refuse the texture, crashing gz-sim's renderer. 16384 is a safe, widely-supported
+    # default (~1 GB VRAM with mipmaps). Override with GAZEBO_MAX_AERIAL_TEXTURE_SIZE.
+    MAX_AERIAL_TEXTURE_SIZE     = int(os.getenv('GAZEBO_MAX_AERIAL_TEXTURE_SIZE', '16384'))
+
