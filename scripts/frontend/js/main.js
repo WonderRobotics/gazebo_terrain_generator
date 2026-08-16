@@ -741,12 +741,68 @@
         });
     }
 
+    // Modal offering to switch to the max available zoom, continue anyway, or abort.
+    // Resolves to 'use-max' | 'continue' | 'abort'.
+    function showAvailabilityModal(requestedZoom, maxZoom) {
+        return new Promise((resolve) => {
+            const hasMax = Number.isInteger(maxZoom);
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:10000;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#1e1e1e;color:#eee;max-width:460px;padding:22px 24px;border-radius:8px;font-family:sans-serif;box-shadow:0 8px 30px rgba(0,0,0,0.5);';
+            const msg = hasMax
+                ? `The imagery provider has no coverage at zoom <b>${requestedZoom}</b> for this area. The highest available zoom here is <b>${maxZoom}</b>.`
+                : `The imagery provider has no coverage at zoom <b>${requestedZoom}</b> for this area, and no lower zoom with imagery was found nearby.`;
+            box.innerHTML = `<h3 style="margin:0 0 10px;font-size:16px;">No satellite imagery at this zoom</h3>
+                <p style="margin:0 0 8px;line-height:1.5;font-size:14px;">${msg}</p>
+                <p style="margin:0 0 18px;line-height:1.5;font-size:13px;color:#bbb;">Continuing anyway will produce a blank gray "Map data not available yet" texture.</p>`;
+            const btns = document.createElement('div');
+            btns.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;';
+            const mkBtn = (label, val, primary) => {
+                const b = document.createElement('button');
+                b.textContent = label;
+                b.style.cssText = `padding:8px 14px;border:none;border-radius:5px;cursor:pointer;font-size:13px;${primary ? 'background:#2e7d32;color:#fff;' : 'background:#3a3a3a;color:#eee;'}`;
+                b.onclick = () => { document.body.removeChild(overlay); resolve(val); };
+                return b;
+            };
+            if (hasMax) btns.appendChild(mkBtn(`Use zoom ${maxZoom}`, 'use-max', true));
+            btns.appendChild(mkBtn('Continue anyway', 'continue', !hasMax));
+            btns.appendChild(mkBtn('Abort', 'abort', false));
+            box.appendChild(btns);
+            overlay.appendChild(box);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { document.body.removeChild(overlay); resolve('abort'); } });
+            document.body.appendChild(overlay);
+        });
+    }
+
+    // Pre-flight imagery-availability check. Returns 'abort', a new zoom number
+    // (user switched to the max available), or null (proceed at requested zoom).
+    async function checkTextureAvailability(source, coords, zoomLevel) {
+        let result;
+        try {
+            const fd = new FormData();
+            fd.append('source', source);
+            fd.append('maxZoom', zoomLevel);
+            fd.append('polygonVertices', JSON.stringify(coords));
+            fd.append('mapboxApiKey', config.mapboxApiKey || '');
+            const resp = await fetch('/check-tile-availability', { method: 'POST', body: fd });
+            result = await resp.json();
+        } catch (e) {
+            return null; // check failed — never block generation on it
+        }
+        if (!result || result.available !== false) return null; // available or unknown
+        const choice = await showAvailabilityModal(result.requestedZoom, result.maxAvailableZoom);
+        if (choice === 'use-max' && Number.isInteger(result.maxAvailableZoom)) return result.maxAvailableZoom;
+        if (choice === 'abort') return 'abort';
+        return null; // continue anyway
+    }
+
     async function startGeneration(modelName) {
         generationCancelled = false;
 
         const timestamp = Date.now().toString();
         const outputFile = '{z}/{x}/{y}.png';
-        const zoomLevel = config.zoomLevel;
+        let zoomLevel = config.zoomLevel;
         const source = config.tileSource;
         const includeBuildings = config.includeBuildings;
         const parallelDownloads = config.parallelDownloads;
@@ -756,6 +812,18 @@
         const coords = polygon.geometry.coordinates[0];
         const lngLat = centerMarker.getLngLat();
         const launchLocation = [lngLat.lng, lngLat.lat];
+
+        // Pre-flight: warn if the provider has no imagery at this zoom for this area.
+        const decision = await checkTextureAvailability(source, coords, zoomLevel);
+        if (decision === 'abort') {
+            showConsole();
+            logToConsole('Generation aborted: no satellite imagery at the selected zoom.', 'error');
+            return;
+        }
+        if (Number.isInteger(decision)) {
+            logToConsole(`Switched to zoom ${decision} (highest available imagery for this area).`, 'info');
+            zoomLevel = decision;
+        }
 
         const tiles = getTiles(zoomLevel);
 

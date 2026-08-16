@@ -16,6 +16,7 @@ from utils.gazebo_world_generator import GazeboTerrainGenerator
 from utils.maptile_utils import MapTileUtils
 from utils.height_map_generator import HeightmapGenerator
 from utils.param import GlobalParam
+from utils.tile_availability import TileAvailability
 
 app = Flask(__name__)
 lock = threading.Lock()
@@ -122,6 +123,26 @@ def download_tile():
 		return jsonify({"code": 200, "message": "Tile downloaded"})
 	else:
 		return jsonify({"code": code, "message": "Download failed"})
+
+
+@app.route('/check-tile-availability', methods=['POST'])
+def check_tile_availability():
+	"""Pre-flight check that the tile provider actually has imagery at the
+	requested zoom for the selected area, so the user can be warned before a
+	full download produces a blank 'Map data not available yet' texture."""
+	postvars = request.form
+	source = str(postvars['source'])
+	zoom = int(postvars['maxZoom'])
+	polygon_vertices = json.loads(postvars['polygonVertices'])
+	api_key = str(postvars.get('mapboxApiKey', ''))
+	try:
+		result = TileAvailability.check(source, polygon_vertices, zoom, api_key)
+		return jsonify({"code": 200, **result})
+	except Exception as e:
+		# Never block generation on a check failure — assume available.
+		print(f"tile availability check failed: {e}")
+		return jsonify({"code": 200, "available": True, "maxAvailableZoom": zoom,
+		                "requestedZoom": zoom, "method": "error", "error": str(e)})
 
 
 @app.route('/start-download', methods=['POST'])
